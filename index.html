@@ -173,6 +173,138 @@
   <script src="src/old-src/render.js"></script>
   <script src="src/old-src/shaders.js"></script>
   <script src="src/old-src/events.js"></script>
+  
+  <!-- Click-and-hold zoom functionality -->
+  <script>
+    let holdZoomInterval = null;
+    let isHoldingZoom = false;
+    let zoomDirection = 1; // 1 for zoom in, -1 for zoom out
+    
+    // Override the existing mousedown handler after events.js loads
+    window.addEventListener('load', function() {
+      const glcontrol = document.getElementById('glcontrol');
+      
+      // Store the current mouse position
+      let currentMouseX = 0;
+      let currentMouseY = 0;
+      
+      // Remove ALL existing mousedown handlers to prevent conflicts
+      const oldMouseDown = glcontrol.onmousedown;
+      glcontrol.onmousedown = null;
+      
+      // Add our custom mousedown handler
+      glcontrol.addEventListener('mousedown', function(e) {
+        // Store initial mouse position
+        currentMouseX = e.offsetX;
+        currentMouseY = e.offsetY;
+        
+        // Only handle left mouse button without ctrl
+        if (e.button === 0 && !e.ctrlKey) {
+          // Check if shift is held for zoom out
+          zoomDirection = e.shiftKey ? -1 : 1;
+          isHoldingZoom = true;
+          
+          // Start the zoom animation with requestAnimationFrame
+          let lastTime = performance.now();
+          const targetFPS = 30;
+          const frameTime = 1000 / targetFPS;
+          
+          function zoomFrame(currentTime) {
+            if (!isHoldingZoom) return;
+            
+            // Throttle to target FPS
+            const deltaTime = currentTime - lastTime;
+            if (deltaTime >= frameTime) {
+              // Get mouse position in fractal coordinates
+              const dx = aim.hx.mul(2 * currentMouseX / glcontrol.width - 1);
+              const dy = aim.hy.mul(2 * currentMouseY / glcontrol.height - 1);
+              const prevCos = Math.cos(aim.phi);
+              const prevSin = Math.sin(aim.phi);
+              
+              const mousePos = {
+                x: aim.x.add(dx.mul(prevCos).add(dy.mul(prevSin))),
+                y: aim.y.add(dx.mul(prevSin).sub(dy.mul(prevCos)))
+              };
+              
+              // Time-based zoom for consistent speed regardless of frame rate
+              const zoomSpeed = 0.6; // Zoom speed per second
+              const zoomAmount = Math.pow(zoomSpeed, deltaTime / 1000);
+              const zoomFactor = zoomDirection === 1 ? zoomAmount : (1 / zoomAmount);
+              
+              // Calculate new center that keeps mouse position fixed
+              const newCenter = {
+                x: mousePos.x.add(aim.x.sub(mousePos.x).mul(zoomFactor)),
+                y: mousePos.y.add(aim.y.sub(mousePos.y).mul(zoomFactor))
+              };
+              
+              // Update aim with new center and zoomed viewport
+              aim.x = newCenter.x;
+              aim.y = newCenter.y;
+              aim.hx = aim.hx.mul(zoomFactor);
+              aim.hy = aim.hy.mul(zoomFactor);
+              draw(aim);
+              Events.updateUI();
+              
+              lastTime = currentTime;
+            }
+            
+            holdZoomInterval = requestAnimationFrame(zoomFrame);
+          }
+          
+          holdZoomInterval = requestAnimationFrame(zoomFrame);
+          
+          // Prevent ALL propagation and default behavior
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          return false;
+        } else {
+          // For other mouse buttons, call the original handler if it exists
+          if (oldMouseDown) oldMouseDown.call(glcontrol, e);
+        }
+      }, true); // Use capture phase to intercept before events.js
+      
+      // Stop zooming on mouseup
+      glcontrol.addEventListener('mouseup', function(e) {
+        if (isHoldingZoom) {
+          isHoldingZoom = false;
+          if (holdZoomInterval) {
+            cancelAnimationFrame(holdZoomInterval);
+            holdZoomInterval = null;
+          }
+          // Prevent the default zoom on mouseup
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          return false;
+        }
+      }, true); // Use capture phase
+      
+      // Also add to window for when mouse is released outside
+      window.addEventListener('mouseup', function(e) {
+        if (isHoldingZoom) {
+          isHoldingZoom = false;
+          if (holdZoomInterval) {
+            cancelAnimationFrame(holdZoomInterval);
+            holdZoomInterval = null;
+          }
+        }
+      });
+      
+      // Update mouse position on move for smooth zooming
+      glcontrol.addEventListener('mousemove', function(e) {
+        // Always update current mouse position
+        currentMouseX = e.offsetX;
+        currentMouseY = e.offsetY;
+        
+        // If we're in the middle of a hold-zoom, prevent default behavior
+        if (isHoldingZoom) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      });
+    });
+  </script>
 
   <!-- Google Analytics -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=UA-132550679-1"></script>
